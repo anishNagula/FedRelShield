@@ -16,6 +16,8 @@ from torch import distributed as dist
 from torch_geometric.data import Data
 from torch_geometric.datasets import RelLinkPredDataset, WordNet18RR
 
+from fedrelshield.data import dataset as fedrelshield_datasets
+
 from ultra import models, datasets
 
 
@@ -145,7 +147,16 @@ def build_dataset(cfg):
     data_config = copy.deepcopy(cfg.dataset)
     cls = data_config.pop("class")
 
-    ds_cls = getattr(datasets, cls)
+    if hasattr(datasets, cls):
+        ds_cls = getattr(datasets, cls)
+
+    elif hasattr(fedrelshield_datasets, cls):
+        ds_cls = getattr(fedrelshield_datasets, cls)
+
+    else:
+        raise ValueError(
+            f"Unknown dataset class: {cls}"
+        )
     dataset = ds_cls(**data_config)
 
     if get_rank() == 0:

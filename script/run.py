@@ -13,6 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from ultra import util, training, evaluation, model_state
 from ultra.models import Ultra
 
+from fedrelshield.data.dataset import resolve_dataset_root
 
 separator = ">" * 30
 line = "-" * 30
@@ -165,6 +166,11 @@ if __name__ == "__main__":
         args.config,
         context=vars,
     )
+
+    if cfg.dataset["class"] == "FedRelShieldDataset":
+        cfg.dataset.root = resolve_dataset_root(
+            cfg.dataset.root
+        )
 
     working_dir = util.create_working_directory(cfg)
 
