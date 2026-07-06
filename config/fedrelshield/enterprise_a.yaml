@@ -1,0 +1,31 @@
+format_version: "1.0"
+
+enterprise:
+  id: enterprise_a
+  profile: windows_active_directory
+  schema: enterprise_a
+  schema_version: "1.0"
+
+generation:
+  topology:
+    seed: 1024
+
+  benign:
+    seed: 1024
+    num_events: 2000
+
+  attacks:
+    seed: 1024
+    num_campaigns: 12
+    start_timestamp: 2000
+    timestamp_step: 1
+    max_attempts_per_campaign: 1000
+
+  exporter:
+    seed: 1024
+    train_campaigns: 8
+    valid_campaigns: 2
+    test_campaigns: 2
+
+output:
+  root: data/fedrelshield

@@ -28,9 +28,15 @@ class EnterpriseDatasetWriter:
         output_dir,
         enterprise_id: str,
         dataset: ExportedDataset,
+        generation_metadata,
     ) -> Dict[str, str]:
         if not enterprise_id:
             raise ValueError("enterprise_id must be non-empty")
+
+        if not isinstance(generation_metadata, dict):
+            raise ValueError(
+                "generation_metadata must be a dictionary"
+            )
 
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -50,13 +56,12 @@ class EnterpriseDatasetWriter:
         )
 
         manifest = self._build_manifest(
-            enterprise_id=enterprise_id,
+        enterprise_id=enterprise_id,
             dataset=dataset,
             file_hashes=file_hashes,
+            generation_metadata=generation_metadata,
         )
 
-        # The manifest is written last so its presence indicates that
-        # all six referenced benchmark files were successfully written.
         self._atomic_write_text(
             path=output_path / "manifest.json",
             content=self._serialize_json(manifest),
@@ -265,32 +270,25 @@ class EnterpriseDatasetWriter:
         enterprise_id: str,
         dataset: ExportedDataset,
         file_hashes: Dict[str, str],
+        generation_metadata,
     ):
         return {
             "format_version": self.FORMAT_VERSION,
             "enterprise_id": enterprise_id,
+            "generation": generation_metadata,
             "counts": {
-                "train_triples": len(
-                    dataset.train_triples
-                ),
-                "valid_triples": len(
-                    dataset.valid_triples
-                ),
-                "test_triples": len(
-                    dataset.test_triples
-                ),
-                "campaigns": len(
-                    dataset.campaigns
-                ),
-                "provenance_records": len(
-                    dataset.provenance
-                ),
+                "train_triples": len(dataset.train_triples),
+                "valid_triples": len(dataset.valid_triples),
+                "test_triples": len(dataset.test_triples),
+                "campaigns": len(dataset.campaigns),
+                "provenance_records": len(dataset.provenance),
             },
             "files": {
                 file_name: file_hashes[file_name]
                 for file_name in self.ARTIFACT_FILES
             },
         }
+
 
     def _compute_artifact_hashes(
         self,
