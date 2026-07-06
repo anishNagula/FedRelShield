@@ -10,7 +10,7 @@ from torch_geometric.data import Data
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from ultra import util, training, evaluation
+from ultra import util, training, evaluation, model_state
 from ultra.models import Ultra
 
 
@@ -150,7 +150,10 @@ def train_and_validate(
         map_location=device,
     )
 
-    model.load_state_dict(state["model"])
+    model_state.load_model_state(
+        model,
+        state["model"],
+    )
 
     util.synchronize()
 
@@ -208,8 +211,9 @@ if __name__ == "__main__":
             map_location="cpu",
         )
 
-        model.load_state_dict(
-            state["model"]
+        model_state.load_model_state(
+            model,
+            state["model"],
         )
 
     # model = pyg.compile(model, dynamic=True)
