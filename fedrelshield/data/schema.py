@@ -70,6 +70,8 @@ ENTERPRISE_A_SCHEMA = SecuritySchema(
             "accesses",
             "hosts_service",
             "invokes",
+            "uses_credential",
+            "executes_on",
         }
     ),
     relation_signatures=frozenset(
@@ -100,6 +102,11 @@ ENTERPRISE_A_SCHEMA = SecuritySchema(
             ("Process", "spawns", "Process"),
             ("Process", "accesses", "File"),
             ("Process", "invokes", "Service"),
+
+            ("Process", "uses_credential", "User"),
+
+            ("Process", "executes_on", "Host"),
+            ("Process", "executes_on", "Server"),
         }
     ),
 )
