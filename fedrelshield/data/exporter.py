@@ -52,6 +52,21 @@ class AttackOccurrence:
     technique: str
     campaign_split: str
 
+@dataclass(frozen=True)
+class ExportedAttackStep:
+    step_index: int
+    technique: str
+    event_id: str
+    timestamp: int
+    triple: Triple
+
+
+@dataclass(frozen=True)
+class ExportedCampaign:
+    campaign_id: str
+    campaign_split: str
+    initial_timestamp: int
+    steps: Tuple[ExportedAttackStep, ...]
 
 @dataclass(frozen=True)
 class TripleProvenance:
@@ -72,6 +87,7 @@ class ExportedDataset:
     campaign_split: CampaignSplit
     statistics: ExportStatistics
     provenance: Tuple[TripleProvenance, ...]
+    campaigns: Tuple[ExportedCampaign, ...]
 
 
 class KGExporter:
@@ -104,6 +120,11 @@ class KGExporter:
     ) -> ExportedDataset:
         campaign_split = self._split_campaigns(
             attack_campaigns,
+        )
+
+        exported_campaigns = self._build_exported_campaigns(
+            attack_campaigns=attack_campaigns,
+            campaign_split=campaign_split,
         )
 
         topology_triples = {
@@ -335,6 +356,7 @@ class KGExporter:
             campaign_split=campaign_split,
             statistics=statistics,
             provenance=provenance,
+            campaigns=exported_campaigns,
         )
 
     def _split_campaigns(
@@ -599,5 +621,70 @@ class KGExporter:
             occurrence.campaign_id,
             occurrence.step_index,
             occurrence.event_id,
+        )
+
+    def _build_exported_campaigns(
+        self,
+        attack_campaigns: List[AttackCampaign],
+        campaign_split: CampaignSplit,
+    ) -> Tuple[ExportedCampaign, ...]:
+        split_by_id = self._campaign_split_by_id(
+            campaign_split
+        )
+    
+        exported_campaigns = []
+    
+        for campaign in attack_campaigns:
+            if campaign.campaign_id not in split_by_id:
+                raise ValueError(
+                    "Attack campaign missing from campaign split: "
+                    f"{campaign.campaign_id}"
+                )
+    
+            ordered_steps = sorted(
+                campaign.steps,
+                key=lambda step: step.step_index,
+            )
+    
+            if [
+                step.step_index
+                for step in ordered_steps
+            ] != list(range(len(ordered_steps))):
+                raise ValueError(
+                    "Campaign steps must have contiguous indices "
+                    f"starting at zero: {campaign.campaign_id}"
+                )
+    
+            exported_steps = tuple(
+                ExportedAttackStep(
+                    step_index=step.step_index,
+                    technique=step.technique,
+                    event_id=step.event.event_id,
+                    timestamp=step.event.timestamp,
+                    triple=(
+                        step.event.head,
+                        step.event.relation,
+                        step.event.tail,
+                    ),
+                )
+                for step in ordered_steps
+            )
+    
+            exported_campaigns.append(
+                ExportedCampaign(
+                    campaign_id=campaign.campaign_id,
+                    campaign_split=split_by_id[
+                        campaign.campaign_id
+                    ],
+                    initial_timestamp=campaign.initial_timestamp,
+                    steps=exported_steps,
+                )
+            )
+    
+        return tuple(
+            sorted(
+                exported_campaigns,
+                key=lambda campaign: campaign.campaign_id,
+            )
         )
 
