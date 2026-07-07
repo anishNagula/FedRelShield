@@ -1,0 +1,48 @@
+output_dir: ~/code/ULTRA/output/fedrelshield/baselines/zero_shot
+
+dataset_root: ~/code/ULTRA/data/fedrelshield
+
+clients:
+  - enterprise_a
+  - enterprise_b
+  - enterprise_c
+  - enterprise_d
+  - enterprise_e
+
+checkpoint: ~/code/ULTRA/ckpts/ultra_4g.pth
+
+baseline:
+  name: zero_shot
+
+model:
+  relation_model:
+    class: RelNBFNet
+    input_dim: 64
+    hidden_dims: [64, 64, 64, 64, 64, 64]
+    message_func: distmult
+    aggregate_func: sum
+    short_cut: yes
+    layer_norm: yes
+
+  entity_model:
+    class: EntityNBFNet
+    input_dim: 64
+    hidden_dims: [64, 64, 64, 64, 64, 64]
+    message_func: distmult
+    aggregate_func: sum
+    short_cut: yes
+    layer_norm: yes
+
+task:
+  name: TransductiveInference
+  num_negative: 256
+  strict_negative: yes
+  adversarial_temperature: 1
+  metric: [mrr, hits@1, hits@3, hits@10]
+  
+train:
+  batch_size: 8
+
+evaluation:
+  split: valid
+
