@@ -1,0 +1,43 @@
+dataset_root: ~/code/ULTRA/data/fedrelshield
+
+clients:
+  - enterprise_a
+  - enterprise_b
+
+checkpoint: ~/code/ULTRA/ckpts/ultra_4g.pth
+
+model:
+  relation_model:
+    class: RelNBFNet
+    input_dim: 64
+    hidden_dims: [64, 64, 64, 64, 64, 64]
+    message_func: distmult
+    aggregate_func: sum
+    short_cut: yes
+    layer_norm: yes
+
+  entity_model:
+    class: EntityNBFNet
+    input_dim: 64
+    hidden_dims: [64, 64, 64, 64, 64, 64]
+    message_func: distmult
+    aggregate_func: sum
+    short_cut: yes
+    layer_norm: yes
+
+task:
+  num_negative: 256
+  strict_negative: yes
+  adversarial_temperature: 1
+
+optimizer:
+  class: AdamW
+  lr: 5.0e-4
+
+train:
+  batch_size: 8
+
+federation:
+  num_rounds: 2
+  local_epochs: 1
+  batch_per_epoch: 5
