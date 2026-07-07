@@ -2,11 +2,12 @@ output_dir: ~/code/ULTRA/output
 
 dataset:
   class: FedRelShieldDataset
-  root: data/fedrelshield
+  root: ~/code/ULTRA/data/fedrelshield
   enterprise_id: enterprise_a
 
 model:
   class: Ultra
+
   relation_model:
     class: RelNBFNet
     input_dim: 64
@@ -15,6 +16,7 @@ model:
     aggregate_func: sum
     short_cut: yes
     layer_norm: yes
+
   entity_model:
     class: EntityNBFNet
     input_dim: 64
@@ -29,14 +31,19 @@ task:
   num_negative: 256
   strict_negative: yes
   adversarial_temperature: 1
-  metric: [mr, mrr, hits@1, hits@3, hits@10]
+  metric:
+    - mr
+    - mrr
+    - hits@1
+    - hits@3
+    - hits@10
 
 optimizer:
   class: AdamW
   lr: 5.0e-4
 
 train:
-  gpus: {{ gpus }}
+  gpus: null
   batch_size: 8
   num_epoch: {{ epochs }}
   log_interval: 100

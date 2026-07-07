@@ -1,6 +1,15 @@
 import argparse
 from pathlib import Path
 
+import os
+import sys
+
+sys.path.append(
+    os.path.dirname(
+        os.path.dirname(__file__)
+    )
+)
+
 from fedrelshield.data.attacks import AttackInjector
 from fedrelshield.data.benign import BenignEventGenerator
 from fedrelshield.data.config import (

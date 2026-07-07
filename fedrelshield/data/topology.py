@@ -2,6 +2,10 @@ from dataclasses import dataclass, field
 from typing import Dict, List
 import random
 
+from fedrelshield.data.profiles import (
+    EnterpriseProfile,
+    ENTERPRISE_A_PROFILE,
+)
 from fedrelshield.data.schema import (
     ENTERPRISE_A_SCHEMA,
     SecuritySchema,
@@ -62,18 +66,22 @@ class EnterpriseTopology:
         self.edges.append(edge)
 
 
-class EnterpriseATopologyGenerator:
+class EnterpriseTopologyGenerator:
     def __init__(
         self,
+        profile: EnterpriseProfile,
         seed: int = 1024,
         schema: SecuritySchema = ENTERPRISE_A_SCHEMA,
     ):
+        profile.validate()
+
+        self.profile = profile
         self.seed = seed
         self.schema = schema
 
     def generate(self) -> EnterpriseTopology:
         topology = EnterpriseTopology(
-            enterprise_id="enterprise_a",
+            enterprise_id=self.profile.enterprise_id,
             schema=self.schema,
         )
 
@@ -86,27 +94,19 @@ class EnterpriseATopologyGenerator:
         self,
         topology: EnterpriseTopology,
     ):
-        entity_counts = {
-            "User": 40,
-            "Host": 60,
-            "Server": 15,
-            "DomainController": 2,
-            "Process": 80,
-            "File": 40,
-            "Service": 20,
-        }
-
-        for entity_type, count in entity_counts.items():
+        for entity_type, count in (
+            self.profile.entity_counts.items()
+        ):
             self.schema.validate_entity_type(entity_type)
 
             prefix = entity_type.lower()
 
             for index in range(count):
-                entity_id = f"{prefix}_{index:03d}"
-
                 topology.add_entity(
                     Entity(
-                        entity_id=entity_id,
+                        entity_id=(
+                            f"{prefix}_{index:03d}"
+                        ),
                         entity_type=entity_type,
                     )
                 )
@@ -121,159 +121,227 @@ class EnterpriseATopologyGenerator:
             topology,
             "User",
         )
-
         hosts = self._entities_of_type(
             topology,
             "Host",
         )
-
         servers = self._entities_of_type(
             topology,
             "Server",
         )
-
         domain_controllers = self._entities_of_type(
             topology,
             "DomainController",
         )
-
         processes = self._entities_of_type(
             topology,
             "Process",
         )
-
         files = self._entities_of_type(
             topology,
             "File",
         )
-
         services = self._entities_of_type(
             topology,
             "Service",
         )
 
-        # ---------------------------------------------------------
-        # Active Directory membership
-        # ---------------------------------------------------------
-
-        # Every workstation belongs to one AD domain controller.
-        for host in hosts:
+        for node in hosts + servers:
             self._add_edge(
                 topology,
-                host,
+                node,
                 "member_of",
                 rng.choice(domain_controllers),
             )
 
-        # Every server belongs to one AD domain controller.
-        for server in servers:
-            self._add_edge(
-                topology,
-                server,
-                "member_of",
-                rng.choice(domain_controllers),
-            )
-
-        # ---------------------------------------------------------
-        # User privileges
-        # ---------------------------------------------------------
-
-        # Each user receives administrative privileges on one host.
-        #
-        # This remains intentionally simple for Enterprise A.
-        # Later enterprise profiles will control privilege density
-        # and user-to-machine assignment independently.
         for user in users:
-            self._add_edge(
-                topology,
-                user,
-                "admin_of",
-                rng.choice(hosts),
-            )
+            assigned_hosts = set()
 
-        # ---------------------------------------------------------
-        # Active behavioral footprint
-        # ---------------------------------------------------------
+            for _ in range(
+                self.profile.admin_assignments_per_user
+            ):
+                available_hosts = [
+                    host
+                    for host in hosts
+                    if host not in assigned_hosts
+                ]
 
-        compute_nodes = hosts + servers
+                if not available_hosts:
+                    break
 
-        # Not every machine necessarily produces process/file
-        # telemetry during one observation window.
-        #
-        # We therefore select a deterministic, seeded subset of
-        # active compute nodes.
-        #
-        # Both processes and files are placed on these nodes so
-        # topology-conditioned local file access is structurally
-        # possible.
+                host = rng.choice(available_hosts)
+                assigned_hosts.add(host)
 
-        num_active_compute_nodes = min(
-            30,
-            len(compute_nodes),
+                self._add_edge(
+                    topology,
+                    user,
+                    "admin_of",
+                    host,
+                )
+
+        active_compute_nodes = self._select_active_nodes(
+            rng,
+            hosts,
+            servers,
         )
 
-        active_compute_nodes = rng.sample(
-            compute_nodes,
-            num_active_compute_nodes,
+        self._place_entities(
+            topology=topology,
+            rng=rng,
+            entity_ids=processes,
+            relation="runs_on",
+            active_compute_nodes=active_compute_nodes,
+            server_probability=(
+                self.profile.process_server_probability
+            ),
         )
 
-        # ---------------------------------------------------------
-        # Process placement
-        # ---------------------------------------------------------
+        self._place_entities(
+            topology=topology,
+            rng=rng,
+            entity_ids=files,
+            relation="stored_on",
+            active_compute_nodes=active_compute_nodes,
+            server_probability=(
+                self.profile.file_server_probability
+            ),
+        )
 
-        # Guarantee every active node contains at least one process.
-        #
-        # Remaining processes are randomly distributed across the
-        # same active footprint.
+        service_hosts = self._select_service_hosts(
+            rng,
+            servers,
+        )
 
-        for process_index, process in enumerate(processes):
-            if process_index < len(active_compute_nodes):
-                target_node = active_compute_nodes[process_index]
-            else:
-                target_node = rng.choice(active_compute_nodes)
-
-            self._add_edge(
-                topology,
-                process,
-                "runs_on",
-                target_node,
-            )
-
-        # ---------------------------------------------------------
-        # File placement
-        # ---------------------------------------------------------
-
-        # Guarantee every active node contains at least one file.
-        #
-        # This ensures every process location has at least one
-        # local file available for topology-conditioned benign
-        # access generation.
-
-        for file_index, file_entity in enumerate(files):
-            if file_index < len(active_compute_nodes):
-                target_node = active_compute_nodes[file_index]
-            else:
-                target_node = rng.choice(active_compute_nodes)
-
-            self._add_edge(
-                topology,
-                file_entity,
-                "stored_on",
-                target_node,
-            )
-
-        # ---------------------------------------------------------
-        # Service placement
-        # ---------------------------------------------------------
-
-        # Services are hosted by servers.
         for service in services:
             self._add_edge(
                 topology,
-                rng.choice(servers),
+                rng.choice(service_hosts),
                 "hosts_service",
                 service,
             )
+
+    def _select_active_nodes(
+        self,
+        rng,
+        hosts,
+        servers,
+    ):
+        compute_nodes = hosts + servers
+
+        target_count = min(
+            self.profile.active_compute_nodes,
+            len(compute_nodes),
+        )
+
+        server_target = min(
+            len(servers),
+            round(
+                target_count
+                * self.profile.process_server_probability
+            ),
+        )
+
+        host_target = target_count - server_target
+
+        if host_target > len(hosts):
+            deficit = host_target - len(hosts)
+            host_target = len(hosts)
+            server_target = min(
+                len(servers),
+                server_target + deficit,
+            )
+
+        selected = []
+
+        if host_target:
+            selected.extend(
+                rng.sample(hosts, host_target)
+            )
+
+        if server_target:
+            selected.extend(
+                rng.sample(servers, server_target)
+            )
+
+        rng.shuffle(selected)
+
+        return selected
+
+    def _place_entities(
+        self,
+        topology,
+        rng,
+        entity_ids,
+        relation,
+        active_compute_nodes,
+        server_probability,
+    ):
+        active_hosts = [
+            node
+            for node in active_compute_nodes
+            if topology.entities[node].entity_type == "Host"
+        ]
+
+        active_servers = [
+            node
+            for node in active_compute_nodes
+            if topology.entities[node].entity_type == "Server"
+        ]
+
+        for index, entity_id in enumerate(entity_ids):
+            if index < len(active_compute_nodes):
+                target = active_compute_nodes[index]
+            else:
+                prefer_server = (
+                    rng.random() < server_probability
+                )
+
+                preferred = (
+                    active_servers
+                    if prefer_server
+                    else active_hosts
+                )
+
+                fallback = (
+                    active_hosts
+                    if prefer_server
+                    else active_servers
+                )
+
+                candidates = preferred or fallback
+
+                target = rng.choice(candidates)
+
+            self._add_edge(
+                topology,
+                entity_id,
+                relation,
+                target,
+            )
+
+    def _select_service_hosts(
+        self,
+        rng,
+        servers,
+    ):
+        concentration = (
+            self.profile.service_server_concentration
+        )
+
+        host_count = max(
+            1,
+            round(len(servers) * concentration),
+        )
+
+        host_count = min(
+            host_count,
+            len(servers),
+        )
+
+        return rng.sample(
+            servers,
+            host_count,
+        )
 
     def _entities_of_type(
         self,
@@ -282,7 +350,8 @@ class EnterpriseATopologyGenerator:
     ) -> List[str]:
         return [
             entity_id
-            for entity_id, entity in topology.entities.items()
+            for entity_id, entity
+            in topology.entities.items()
             if entity.entity_type == entity_type
         ]
 
@@ -300,3 +369,19 @@ class EnterpriseATopologyGenerator:
                 tail=tail,
             )
         )
+
+
+class EnterpriseATopologyGenerator(
+    EnterpriseTopologyGenerator
+):
+    def __init__(
+        self,
+        seed: int = 1024,
+        schema: SecuritySchema = ENTERPRISE_A_SCHEMA,
+    ):
+        super().__init__(
+            profile=ENTERPRISE_A_PROFILE,
+            seed=seed,
+            schema=schema,
+        )
+

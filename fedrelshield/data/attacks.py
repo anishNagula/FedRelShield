@@ -22,7 +22,9 @@ class AttackCampaign:
             raise ValueError("campaign_id must be non-empty")
 
         if not self.steps:
-            raise ValueError("attack campaign must contain at least one step")
+            raise ValueError(
+                "attack campaign must contain at least one step"
+            )
 
         expected_indices = list(range(len(self.steps)))
 
@@ -87,10 +89,14 @@ class AttackInjector:
         max_attempts_per_campaign: int = 1000,
     ):
         if num_campaigns < 0:
-            raise ValueError("num_campaigns must be non-negative")
+            raise ValueError(
+                "num_campaigns must be non-negative"
+            )
 
         if timestamp_step <= 0:
-            raise ValueError("timestamp_step must be positive")
+            raise ValueError(
+                "timestamp_step must be positive"
+            )
 
         if max_attempts_per_campaign <= 0:
             raise ValueError(
@@ -101,158 +107,259 @@ class AttackInjector:
         self.num_campaigns = num_campaigns
         self.start_timestamp = start_timestamp
         self.timestamp_step = timestamp_step
-        self.max_attempts_per_campaign = max_attempts_per_campaign
+
+        # Retained for configuration compatibility.
+        self.max_attempts_per_campaign = (
+            max_attempts_per_campaign
+        )
 
     def inject(self, topology) -> List[AttackCampaign]:
         import random
-
+    
         rng = random.Random(self.seed)
-
-        users = self._entities_of_type(topology, "User")
-        hosts = self._entities_of_type(topology, "Host")
-        servers = self._entities_of_type(topology, "Server")
-        processes = self._entities_of_type(topology, "Process")
-        services = self._entities_of_type(topology, "Service")
-
-        process_locations = self._process_locations(topology)
-        service_hosts = self._service_hosts(topology)
-
-        if not all([users, hosts, servers, processes, services]):
+    
+        users = self._entities_of_type(
+            topology,
+            "User",
+        )
+    
+        hosts = self._entities_of_type(
+            topology,
+            "Host",
+        )
+    
+        servers = self._entities_of_type(
+            topology,
+            "Server",
+        )
+    
+        processes = self._entities_of_type(
+            topology,
+            "Process",
+        )
+    
+        services = self._entities_of_type(
+            topology,
+            "Service",
+        )
+    
+        if not all(
+            [
+                users,
+                hosts,
+                servers,
+                processes,
+                services,
+            ]
+        ):
             raise ValueError(
-                "Topology is missing entities required for attack injection"
+                "Topology is missing entities required "
+                "for attack injection"
             )
-
-        processes_by_node = self._group_processes_by_node(
-            process_locations,
+    
+        process_locations = self._process_locations(
+            topology
         )
-
-        services_by_server = self._group_services_by_server(
-            service_hosts,
+    
+        service_hosts = self._service_hosts(
+            topology
         )
-
+    
+        processes_by_node = (
+            self._group_processes_by_node(
+                process_locations
+            )
+        )
+    
+        services_by_server = (
+            self._group_services_by_server(
+                service_hosts
+            )
+        )
+    
         eligible_targets = [
             server
             for server in servers
             if processes_by_node.get(server)
             and services_by_server.get(server)
         ]
-
+    
         if not eligible_targets:
             raise ValueError(
-                "Topology has no server with both a local process "
-                "and a hosted service"
+                "Topology has no server with both "
+                "a local process and a hosted service"
             )
-
-        campaigns = []
-
-        # Exact attack triples already used by accepted campaigns.
+    
+        campaign_candidates = (
+            self._build_campaign_candidates(
+                users=users,
+                processes=processes,
+                eligible_targets=eligible_targets,
+                process_locations=process_locations,
+                processes_by_node=processes_by_node,
+                services_by_server=services_by_server,
+            )
+        )
+    
+        if not campaign_candidates:
+            raise RuntimeError(
+                "No feasible attack campaign candidates"
+            )
+    
         #
-        # Entities may be reused across campaigns, but the same
-        # (head, relation, tail) attack fact may not appear twice.
-        used_attack_triples = set()
-
-        for campaign_index in range(self.num_campaigns):
-            campaign_id = f"campaign_{campaign_index:03d}"
-
+        # Campaigns are sampled without duplicate complete campaign
+        # parameterizations.
+        #
+        # Individual attack triples may occur in multiple campaigns.
+        # This is intentional: shared infrastructure, accounts,
+        # processes, and services are realistic in enterprise attack
+        # activity.
+        #
+        # Link-prediction split disjointness is enforced later by
+        # KGExporter.
+        #
+    
+        if self.num_campaigns > len(campaign_candidates):
+            raise RuntimeError(
+                "Requested more attack campaigns than "
+                "available unique campaign candidates: "
+                f"requested={self.num_campaigns}, "
+                f"available={len(campaign_candidates)}"
+            )
+    
+        selected_candidates = rng.sample(
+            campaign_candidates,
+            self.num_campaigns,
+        )
+    
+        campaigns = []
+    
+        for campaign_index, candidate in enumerate(
+            selected_candidates
+        ):
+            (
+                source_process,
+                compromised_user,
+                target_node,
+                remote_process,
+                target_service,
+                _,
+            ) = candidate
+    
+            campaign_id = (
+                f"campaign_{campaign_index:03d}"
+            )
+    
             initial_timestamp = (
                 self.start_timestamp
                 + campaign_index
                 * self.STEPS_PER_CAMPAIGN
                 * self.timestamp_step
             )
-
-            campaign = None
-
-            for _ in range(self.max_attempts_per_campaign):
-                candidate = self._generate_candidate_campaign(
-                    topology=topology,
-                    rng=rng,
-                    campaign_id=campaign_id,
-                    initial_timestamp=initial_timestamp,
-                    users=users,
-                    processes=processes,
-                    eligible_targets=eligible_targets,
-                    process_locations=process_locations,
-                    processes_by_node=processes_by_node,
-                    services_by_server=services_by_server,
-                )
-
-                candidate_triples = {
-                    (
-                        event.head,
-                        event.relation,
-                        event.tail,
-                    )
-                    for event in candidate.events
-                }
-
-                # A campaign should not contain duplicate triples
-                # internally.
-                if len(candidate_triples) != len(candidate.events):
-                    continue
-
-                # Reject candidates that reuse any exact attack
-                # triple from an earlier accepted campaign.
-                if candidate_triples & used_attack_triples:
-                    continue
-
-                campaign = candidate
-
-                used_attack_triples.update(
-                    candidate_triples
-                )
-
-                break
-
-            if campaign is None:
-                raise RuntimeError(
-                    "Unable to generate a triple-disjoint attack "
-                    f"campaign after {self.max_attempts_per_campaign} "
-                    f"attempts: {campaign_id}"
-                )
-
+    
+            campaign = self._build_campaign(
+                topology=topology,
+                campaign_id=campaign_id,
+                initial_timestamp=initial_timestamp,
+                source_process=source_process,
+                compromised_user=compromised_user,
+                target_node=target_node,
+                remote_process=remote_process,
+                target_service=target_service,
+            )
+    
             campaigns.append(campaign)
-
+    
         return campaigns
 
-    def _generate_candidate_campaign(
+    def _build_campaign_candidates(
         self,
-        topology,
-        rng,
-        campaign_id,
-        initial_timestamp,
         users,
         processes,
         eligible_targets,
         process_locations,
         processes_by_node,
         services_by_server,
+    ):
+        candidates = []
+
+        for source_process in processes:
+            source_node = process_locations[
+                source_process
+            ]
+
+            for compromised_user in users:
+                for target_node in eligible_targets:
+                    if target_node == source_node:
+                        continue
+
+                    for remote_process in (
+                        processes_by_node[target_node]
+                    ):
+                        for target_service in (
+                            services_by_server[target_node]
+                        ):
+                            triples = (
+                                (
+                                    source_process,
+                                    "uses_credential",
+                                    compromised_user,
+                                ),
+                                (
+                                    compromised_user,
+                                    "authenticates_to",
+                                    target_node,
+                                ),
+                                (
+                                    source_node,
+                                    "connects_to",
+                                    target_node,
+                                ),
+                                (
+                                    remote_process,
+                                    "executes_on",
+                                    target_node,
+                                ),
+                                (
+                                    remote_process,
+                                    "invokes",
+                                    target_service,
+                                ),
+                            )
+
+                            if (
+                                len(set(triples))
+                                != self.STEPS_PER_CAMPAIGN
+                            ):
+                                continue
+
+                            candidates.append(
+                                (
+                                    source_process,
+                                    compromised_user,
+                                    target_node,
+                                    remote_process,
+                                    target_service,
+                                    frozenset(triples),
+                                )
+                            )
+
+        return candidates
+
+    def _build_campaign(
+        self,
+        topology,
+        campaign_id,
+        initial_timestamp,
+        source_process,
+        compromised_user,
+        target_node,
+        remote_process,
+        target_service,
     ) -> AttackCampaign:
-        source_process = rng.choice(processes)
-        source_node = process_locations[source_process]
-
-        compromised_user = rng.choice(users)
-
-        target_candidates = [
-            server
-            for server in eligible_targets
-            if server != source_node
-        ]
-
-        if not target_candidates:
-            raise ValueError(
-                "No eligible attack target distinct from source node"
-            )
-
-        target_node = rng.choice(target_candidates)
-
-        target_service = rng.choice(
-            services_by_server[target_node]
-        )
-
-        remote_process = rng.choice(
-            processes_by_node[target_node]
-        )
+        source_node = self._process_locations(
+            topology
+        )[source_process]
 
         event_specs = [
             (
@@ -300,8 +407,13 @@ class AttackInjector:
                 + step_index * self.timestamp_step
             )
 
-            head_type = topology.entities[head].entity_type
-            tail_type = topology.entities[tail].entity_type
+            head_type = (
+                topology.entities[head].entity_type
+            )
+
+            tail_type = (
+                topology.entities[tail].entity_type
+            )
 
             topology.schema.validate_edge(
                 head_type,
@@ -311,7 +423,8 @@ class AttackInjector:
 
             event = SecurityEvent(
                 event_id=(
-                    f"attack_{campaign_id}_{step_index:03d}"
+                    f"attack_{campaign_id}_"
+                    f"{step_index:03d}"
                 ),
                 timestamp=timestamp,
                 head=head,
@@ -342,7 +455,8 @@ class AttackInjector:
     ):
         return [
             entity_id
-            for entity_id, entity in topology.entities.items()
+            for entity_id, entity
+            in topology.entities.items()
             if entity.entity_type == entity_type
         ]
 
@@ -393,3 +507,4 @@ class AttackInjector:
             ).append(service)
 
         return services_by_server
+

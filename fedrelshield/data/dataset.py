@@ -8,11 +8,11 @@ from ultra.tasks import build_relation_graph
 
 
 def resolve_dataset_root(root):
-        return str(
-            Path(root)
-           .expanduser()
-           .resolve()
-        )
+    return str(
+        Path(root)
+        .expanduser()
+        .resolve()
+    )
 
 
 class FedRelShieldDataset(InMemoryDataset):
@@ -110,8 +110,21 @@ class FedRelShieldDataset(InMemoryDataset):
                 "FedRelShield training split must be non-empty"
             )
 
+        if not valid_triples:
+            raise ValueError(
+                "FedRelShield validation split must be non-empty"
+            )
+
+        if not test_triples:
+            raise ValueError(
+                "FedRelShield test split must be non-empty"
+            )
+
         num_entities = len(entity_vocab)
-        num_forward_relations = len(relation_vocab)
+
+        num_forward_relations = len(
+            relation_vocab
+        )
 
         train_tensor = torch.tensor(
             train_triples,
@@ -129,23 +142,35 @@ class FedRelShieldDataset(InMemoryDataset):
         )
 
         train_target_edge_index = (
-            train_tensor[:, :2].t().contiguous()
+            train_tensor[:, :2]
+            .t()
+            .contiguous()
         )
-        train_target_edge_type = train_tensor[:, 2]
+
+        train_target_edge_type = (
+            train_tensor[:, 2]
+        )
 
         valid_target_edge_index = (
-            valid_tensor[:, :2].t().contiguous()
+            valid_tensor[:, :2]
+            .t()
+            .contiguous()
         )
-        valid_target_edge_type = valid_tensor[:, 2]
+
+        valid_target_edge_type = (
+            valid_tensor[:, 2]
+        )
 
         test_target_edge_index = (
-            test_tensor[:, :2].t().contiguous()
+            test_tensor[:, :2]
+            .t()
+            .contiguous()
         )
-        test_target_edge_type = test_tensor[:, 2]
 
-        # ULTRA's transductive contract:
-        # training triples define the fact graph and inverse
-        # relations are added only to that graph.
+        test_target_edge_type = (
+            test_tensor[:, 2]
+        )
+
         fact_edge_index = torch.cat(
             [
                 train_target_edge_index,
@@ -157,13 +182,17 @@ class FedRelShieldDataset(InMemoryDataset):
         fact_edge_type = torch.cat(
             [
                 train_target_edge_type,
-                train_target_edge_type
-                + num_forward_relations,
+                (
+                    train_target_edge_type
+                    + num_forward_relations
+                ),
             ],
             dim=0,
         )
 
-        num_relations = 2 * num_forward_relations
+        num_relations = (
+            2 * num_forward_relations
+        )
 
         train_data = Data(
             edge_index=fact_edge_index,
@@ -193,9 +222,17 @@ class FedRelShieldDataset(InMemoryDataset):
         )
 
         if self.pre_transform is not None:
-            train_data = self.pre_transform(train_data)
-            valid_data = self.pre_transform(valid_data)
-            test_data = self.pre_transform(test_data)
+            train_data = self.pre_transform(
+                train_data
+            )
+
+            valid_data = self.pre_transform(
+                valid_data
+            )
+
+            test_data = self.pre_transform(
+                test_data
+            )
 
         torch.save(
             self.collate(
@@ -216,12 +253,21 @@ class FedRelShieldDataset(InMemoryDataset):
     ):
         triples = []
 
-        with open(path, "r", encoding="utf-8") as file:
-            for line_number, line in enumerate(file, start=1):
-                head, relation, tail = self._parse_line(
-                    line,
-                    path,
-                    line_number,
+        with open(
+            path,
+            "r",
+            encoding="utf-8",
+        ) as file:
+            for line_number, line in enumerate(
+                file,
+                start=1,
+            ):
+                head, relation, tail = (
+                    self._parse_line(
+                        line,
+                        path,
+                        line_number,
+                    )
                 )
 
                 head_id = self._get_or_create_id(
@@ -234,9 +280,11 @@ class FedRelShieldDataset(InMemoryDataset):
                     tail,
                 )
 
-                relation_id = self._get_or_create_id(
-                    relation_vocab,
-                    relation,
+                relation_id = (
+                    self._get_or_create_id(
+                        relation_vocab,
+                        relation,
+                    )
                 )
 
                 triples.append(
@@ -257,12 +305,21 @@ class FedRelShieldDataset(InMemoryDataset):
     ):
         triples = []
 
-        with open(path, "r", encoding="utf-8") as file:
-            for line_number, line in enumerate(file, start=1):
-                head, relation, tail = self._parse_line(
-                    line,
-                    path,
-                    line_number,
+        with open(
+            path,
+            "r",
+            encoding="utf-8",
+        ) as file:
+            for line_number, line in enumerate(
+                file,
+                start=1,
+            ):
+                head, relation, tail = (
+                    self._parse_line(
+                        line,
+                        path,
+                        line_number,
+                    )
                 )
 
                 if relation not in relation_vocab:
@@ -272,25 +329,24 @@ class FedRelShieldDataset(InMemoryDataset):
                         f"{relation}"
                     )
 
-                # Transductive evaluation requires one shared
-                # entity vocabulary across all splits. Evaluation
-                # entities may be registered here if absent from
-                # training, although the current benchmark exporter
-                # should normally prevent that situation.
-                head_id = self._get_or_create_id(
-                    entity_vocab,
-                    head,
-                )
+                if head not in entity_vocab:
+                    raise ValueError(
+                        "Evaluation head entity missing from "
+                        "training entity vocabulary: "
+                        f"{head}"
+                    )
 
-                tail_id = self._get_or_create_id(
-                    entity_vocab,
-                    tail,
-                )
+                if tail not in entity_vocab:
+                    raise ValueError(
+                        "Evaluation tail entity missing from "
+                        "training entity vocabulary: "
+                        f"{tail}"
+                    )
 
                 triples.append(
                     (
-                        head_id,
-                        tail_id,
+                        entity_vocab[head],
+                        entity_vocab[tail],
                         relation_vocab[relation],
                     )
                 )
@@ -307,7 +363,8 @@ class FedRelShieldDataset(InMemoryDataset):
 
         if not stripped:
             raise ValueError(
-                f"Empty triple at {path}:{line_number}"
+                f"Empty triple at "
+                f"{path}:{line_number}"
             )
 
         fields = stripped.split("\t")
@@ -334,7 +391,9 @@ class FedRelShieldDataset(InMemoryDataset):
         token,
     ):
         if token not in vocabulary:
-            vocabulary[token] = len(vocabulary)
+            vocabulary[token] = len(
+                vocabulary
+            )
 
         return vocabulary[token]
 
@@ -351,33 +410,51 @@ class FedRelShieldDataset(InMemoryDataset):
         ) as file:
             manifest = json.load(file)
 
-        if manifest.get("enterprise_id") != self.enterprise_id:
+        if (
+            manifest.get("enterprise_id")
+            != self.enterprise_id
+        ):
             raise ValueError(
                 "Manifest enterprise ID does not match "
-                f"requested enterprise: {self.enterprise_id}"
+                "requested enterprise: "
+                f"{self.enterprise_id}"
             )
 
-        expected_counts = manifest.get("counts")
+        expected_counts = manifest.get(
+            "counts"
+        )
 
-        if not isinstance(expected_counts, dict):
+        if not isinstance(
+            expected_counts,
+            dict,
+        ):
             raise ValueError(
-                "Manifest counts field must be a dictionary"
+                "Manifest counts field must be "
+                "a dictionary"
             )
 
         actual_counts = {
             "train_triples": self._count_lines(
-                Path(self.raw_dir) / "train.txt"
+                Path(self.raw_dir)
+                / "train.txt"
             ),
             "valid_triples": self._count_lines(
-                Path(self.raw_dir) / "valid.txt"
+                Path(self.raw_dir)
+                / "valid.txt"
             ),
             "test_triples": self._count_lines(
-                Path(self.raw_dir) / "test.txt"
+                Path(self.raw_dir)
+                / "test.txt"
             ),
         }
 
-        for key, actual_count in actual_counts.items():
-            if expected_counts.get(key) != actual_count:
+        for key, actual_count in (
+            actual_counts.items()
+        ):
+            if (
+                expected_counts.get(key)
+                != actual_count
+            ):
                 raise ValueError(
                     "Manifest count mismatch for "
                     f"{key}: expected "
@@ -385,6 +462,16 @@ class FedRelShieldDataset(InMemoryDataset):
                     f"received {actual_count}"
                 )
 
-    def _count_lines(self, path):
-        with open(path, "r", encoding="utf-8") as file:
-            return sum(1 for _ in file)
+    def _count_lines(
+        self,
+        path,
+    ):
+        with open(
+            path,
+            "r",
+            encoding="utf-8",
+        ) as file:
+            return sum(
+                1
+                for _ in file
+            )
