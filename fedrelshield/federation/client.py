@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import hashlib
 
 import torch
 
@@ -21,10 +22,16 @@ class FederatedClient:
         train_data,
         cfg,
         device,
+        base_seed,
     ):
         if not client_id:
             raise ValueError(
                 "client_id must be non-empty"
+            )
+
+        if base_seed < 0:
+            raise ValueError(
+                "base_seed must be non-negative"
             )
 
         self.client_id = client_id
@@ -32,8 +39,54 @@ class FederatedClient:
         self.train_data = train_data
         self.cfg = cfg
         self.device = device
+        self.base_seed = int(base_seed)
 
-        self.train_loader, self.sampler = (
+    @property
+    def num_examples(self):
+        return int(
+            self.train_data.target_edge_index.shape[1]
+        )
+
+    def _client_seed_offset(self):
+        digest = hashlib.sha256(
+            self.client_id.encode("utf-8")
+        ).digest()
+
+        return int.from_bytes(
+            digest[:8],
+            byteorder="big",
+            signed=False,
+        )
+
+    def _local_seed(
+        self,
+        round_id,
+        local_epoch,
+    ):
+        if round_id < 0:
+            raise ValueError(
+                "round_id must be non-negative"
+            )
+
+        if local_epoch < 0:
+            raise ValueError(
+                "local_epoch must be non-negative"
+            )
+
+        max_seed = 2**63 - 1
+
+        return (
+            self.base_seed
+            + self._client_seed_offset()
+            + round_id * 1_000_003
+            + local_epoch * 10_007
+        ) % max_seed
+
+    def _build_epoch_loader(
+        self,
+        local_seed,
+    ):
+        train_loader, sampler = (
             training.build_train_loader(
                 train_data=self.train_data,
                 batch_size=self.cfg.train.batch_size,
@@ -42,11 +95,9 @@ class FederatedClient:
             )
         )
 
-    @property
-    def num_examples(self):
-        return int(
-            self.train_data.target_edge_index.shape[1]
-        )
+        sampler.set_epoch(local_seed)
+
+        return train_loader
 
     def train(
         self,
@@ -78,23 +129,47 @@ class FederatedClient:
         epoch_losses = []
 
         for local_epoch in range(local_epochs):
-            sampler_epoch = (
-                round_id * local_epochs
-                + local_epoch
+            local_seed = self._local_seed(
+                round_id=round_id,
+                local_epoch=local_epoch,
             )
 
-            self.sampler.set_epoch(sampler_epoch)
+            devices = []
 
-            average_loss = training.train_one_epoch(
-                cfg=self.cfg,
-                model=self.model,
-                train_data=self.train_data,
-                train_loader=self.train_loader,
-                optimizer=optimizer,
-                batch_per_epoch=batch_per_epoch,
+            if self.device.type == "cuda":
+                devices = [self.device]
+
+            with torch.random.fork_rng(
+                devices=devices,
+                enabled=True,
+            ):
+                torch.manual_seed(local_seed)
+
+                if self.device.type == "cuda":
+                    torch.cuda.manual_seed_all(
+                        local_seed
+                    )
+
+                train_loader = (
+                    self._build_epoch_loader(
+                        local_seed=local_seed,
+                    )
+                )
+
+                average_loss = (
+                    training.train_one_epoch(
+                        cfg=self.cfg,
+                        model=self.model,
+                        train_data=self.train_data,
+                        train_loader=train_loader,
+                        optimizer=optimizer,
+                        batch_per_epoch=batch_per_epoch,
+                    )
+                )
+
+            epoch_losses.append(
+                average_loss
             )
-
-            epoch_losses.append(average_loss)
 
         local_state = model_state.get_model_state(
             self.model,
@@ -107,6 +182,7 @@ class FederatedClient:
             state=local_state,
             num_examples=self.num_examples,
             average_loss=(
-                sum(epoch_losses) / len(epoch_losses)
+                sum(epoch_losses)
+                / len(epoch_losses)
             ),
         )

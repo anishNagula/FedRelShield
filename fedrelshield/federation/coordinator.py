@@ -8,6 +8,7 @@ class FederatedRoundResult:
     round_id: int
     client_results: tuple
     global_state: dict
+    evaluation_result: object = None
 
 
 class FederatedCoordinator:
@@ -16,10 +17,12 @@ class FederatedCoordinator:
         server,
         clients,
         aggregator,
+        evaluator=None,
     ):
         self.server = server
         self.clients = tuple(clients)
         self.aggregator = aggregator
+        self.evaluator = evaluator
 
         if len(self.clients) < 2:
             raise ValueError(
@@ -75,7 +78,7 @@ class FederatedCoordinator:
         aggregated_state = self.aggregator.aggregate(
             client_results
         )
-        
+
         for result in client_results:
             if model_state.model_states_equal(
                 aggregated_state,
@@ -108,10 +111,20 @@ class FederatedCoordinator:
                 "aggregated state after loading"
             )
 
+        evaluation_result = None
+
+        if self.evaluator is not None:
+            evaluation_result = (
+                self.server.evaluate(
+                    self.evaluator
+                )
+            )
+
         return FederatedRoundResult(
             round_id=round_id,
             client_results=client_results,
             global_state=global_state,
+            evaluation_result=evaluation_result,
         )
 
     def run(
@@ -119,15 +132,24 @@ class FederatedCoordinator:
         num_rounds,
         local_epochs,
         batch_per_epoch,
+        start_round=0,
     ):
         if num_rounds <= 0:
             raise ValueError(
                 "num_rounds must be positive"
             )
 
+        if start_round < 0:
+            raise ValueError(
+                "start_round must be non-negative"
+            )
+
         results = []
 
-        for round_id in range(num_rounds):
+        for round_id in range(
+            start_round,
+            start_round + num_rounds,
+        ):
             results.append(
                 self.run_round(
                     round_id=round_id,
@@ -161,4 +183,3 @@ class FederatedCoordinator:
                     "Aggregated state shape mismatch: "
                     f"{name}"
                 )
-

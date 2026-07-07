@@ -30,3 +30,9 @@ class FederatedServer:
             device="cpu",
             clone=True,
         )
+
+    def evaluate(
+        self,
+        evaluator,
+    ):
+        return evaluator(self.model)

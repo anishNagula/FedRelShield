@@ -1,3 +1,6 @@
+Here is the updated script with `base_seed=args.seed` added to the `FederatedClient` instantiation. Since `args.seed` is explicitly exposed by `parse_args()`, we can pass it directly into the client constructor.
+
+```python
 import argparse
 import os
 import sys
@@ -153,12 +156,14 @@ def main():
 
         client_model = build_model(cfg).to(device)
 
+        # Added base_seed parameter here
         client = FederatedClient(
             client_id=client_id,
             model=client_model,
             train_data=train_data,
             cfg=cfg,
             device=device,
+            base_seed=args.seed,
         )
 
         clients.append(client)
@@ -254,3 +259,4 @@ def main():
 if __name__ == "__main__":
     main()
 
+```
