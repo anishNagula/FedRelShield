@@ -1,0 +1,31 @@
+format_version: "1.0"
+
+enterprise:
+  id: enterprise_b
+  profile: cloud_native_services
+  schema: enterprise_a
+  schema_version: "1.0"
+
+generation:
+  topology:
+    seed: 2048
+
+  benign:
+    seed: 2048
+    num_events: 3000
+
+  attacks:
+    seed: 2048
+    num_campaigns: 16
+    start_timestamp: 3000
+    timestamp_step: 1
+    max_attempts_per_campaign: 1000
+
+  exporter:
+    seed: 2048
+    train_campaigns: 10
+    valid_campaigns: 3
+    test_campaigns: 3
+
+output:
+  root: data/fedrelshield

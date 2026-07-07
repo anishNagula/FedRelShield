@@ -1,0 +1,31 @@
+format_version: "1.0"
+
+enterprise:
+  id: enterprise_c
+  profile: hybrid_enterprise
+  schema: enterprise_a
+  schema_version: "1.0"
+
+generation:
+  topology:
+    seed: 3072
+
+  benign:
+    seed: 3072
+    num_events: 2500
+
+  attacks:
+    seed: 3072
+    num_campaigns: 20
+    start_timestamp: 3000
+    timestamp_step: 1
+    max_attempts_per_campaign: 1000
+
+  exporter:
+    seed: 3072
+    train_campaigns: 12
+    valid_campaigns: 4
+    test_campaigns: 4
+
+output:
+  root: data/fedrelshield

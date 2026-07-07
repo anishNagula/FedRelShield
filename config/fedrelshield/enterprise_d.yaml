@@ -1,0 +1,31 @@
+format_version: "1.0"
+
+enterprise:
+  id: enterprise_d
+  profile: linux_infrastructure
+  schema: enterprise_a
+  schema_version: "1.0"
+
+generation:
+  topology:
+    seed: 4096
+
+  benign:
+    seed: 4096
+    num_events: 3500
+
+  attacks:
+    seed: 4096
+    num_campaigns: 24
+    start_timestamp: 4000
+    timestamp_step: 1
+    max_attempts_per_campaign: 1000
+
+  exporter:
+    seed: 4096
+    train_campaigns: 16
+    valid_campaigns: 4
+    test_campaigns: 4
+
+output:
+  root: data/fedrelshield

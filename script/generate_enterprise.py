@@ -1,8 +1,7 @@
 import argparse
-from pathlib import Path
-
 import os
 import sys
+from pathlib import Path
 
 sys.path.append(
     os.path.dirname(
@@ -15,14 +14,18 @@ from fedrelshield.data.benign import BenignEventGenerator
 from fedrelshield.data.config import (
     enterprise_config_metadata,
     load_enterprise_config,
+    resolve_enterprise_profile,
 )
 from fedrelshield.data.exporter import KGExporter
-from fedrelshield.data.topology import EnterpriseATopologyGenerator
+from fedrelshield.data.schema import ENTERPRISE_A_SCHEMA
+from fedrelshield.data.topology import (
+    EnterpriseTopologyGenerator,
+)
 from fedrelshield.data.writer import EnterpriseDatasetWriter
 
 
-TOPOLOGY_GENERATORS = {
-    "enterprise_a": EnterpriseATopologyGenerator,
+SCHEMAS = {
+    "enterprise_a": ENTERPRISE_A_SCHEMA,
 }
 
 
@@ -44,11 +47,9 @@ def parse_args():
     return parser.parse_args()
 
 
-def build_topology(config):
+def build_topology(config, profile):
     try:
-        generator_class = TOPOLOGY_GENERATORS[
-            config.schema
-        ]
+        schema = SCHEMAS[config.schema]
 
     except KeyError as error:
         raise ValueError(
@@ -56,8 +57,10 @@ def build_topology(config):
             f"{config.schema}"
         ) from error
 
-    topology = generator_class(
+    topology = EnterpriseTopologyGenerator(
+        profile=profile,
         seed=config.topology_seed,
+        schema=schema,
     ).generate()
 
     if topology.enterprise_id != config.enterprise_id:
@@ -72,11 +75,17 @@ def build_topology(config):
 
 
 def generate_enterprise(config):
-    topology = build_topology(config)
+    profile = resolve_enterprise_profile(config)
+
+    topology = build_topology(
+        config=config,
+        profile=profile,
+    )
 
     benign_events = BenignEventGenerator(
         seed=config.benign_seed,
         num_events=config.benign_num_events,
+        profile=profile,
     ).generate(topology)
 
     attack_campaigns = AttackInjector(
@@ -130,6 +139,8 @@ def main():
     print(f"Profile: {config.profile}")
     print(f"Schema: {config.schema}")
     print(f"Output: {output_dir}")
+    print(f"Entities: {len(topology.entities)}")
+    print(f"Structural edges: {len(topology.edges)}")
     print(f"Train triples: {len(dataset.train_triples)}")
     print(f"Valid triples: {len(dataset.valid_triples)}")
     print(f"Test triples: {len(dataset.test_triples)}")

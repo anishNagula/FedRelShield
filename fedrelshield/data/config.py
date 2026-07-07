@@ -3,6 +3,11 @@ from pathlib import Path
 
 import yaml
 
+from fedrelshield.data.profiles import (
+    EnterpriseProfile,
+    get_enterprise_profile,
+)
+
 
 @dataclass(frozen=True)
 class EnterpriseConfig:
@@ -36,6 +41,23 @@ def enterprise_config_metadata(
     config: EnterpriseConfig,
 ):
     return asdict(config)
+
+
+def resolve_enterprise_profile(
+    config: EnterpriseConfig,
+) -> EnterpriseProfile:
+    profile = get_enterprise_profile(
+        config.enterprise_id
+    )
+
+    if profile.profile_name != config.profile:
+        raise ValueError(
+            "Configured profile name does not match "
+            "registered enterprise profile: "
+            f"{config.profile} != {profile.profile_name}"
+        )
+
+    return profile
 
 
 def load_enterprise_config(
@@ -186,12 +208,6 @@ def _validate_enterprise_config(
             "generation.exporter.seed must be non-negative"
         )
 
-    split_count = (
-        config.exporter_train_campaigns
-        + config.exporter_valid_campaigns
-        + config.exporter_test_campaigns
-    )
-
     if min(
         config.exporter_train_campaigns,
         config.exporter_valid_campaigns,
@@ -200,6 +216,12 @@ def _validate_enterprise_config(
         raise ValueError(
             "exporter campaign split counts must be non-negative"
         )
+
+    split_count = (
+        config.exporter_train_campaigns
+        + config.exporter_valid_campaigns
+        + config.exporter_test_campaigns
+    )
 
     if split_count != config.attack_num_campaigns:
         raise ValueError(
@@ -211,3 +233,5 @@ def _validate_enterprise_config(
         raise ValueError(
             "output.root must be non-empty"
         )
+
+    resolve_enterprise_profile(config)

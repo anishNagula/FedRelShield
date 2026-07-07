@@ -1,0 +1,31 @@
+format_version: "1.0"
+
+enterprise:
+  id: enterprise_e
+  profile: iot_ot_edge
+  schema: enterprise_a
+  schema_version: "1.0"
+
+generation:
+  topology:
+    seed: 5120
+
+  benign:
+    seed: 5120
+    num_events: 1800
+
+  attacks:
+    seed: 5120
+    num_campaigns: 16
+    start_timestamp: 2000
+    timestamp_step: 1
+    max_attempts_per_campaign: 1000
+
+  exporter:
+    seed: 5120
+    train_campaigns: 10
+    valid_campaigns: 3
+    test_campaigns: 3
+
+output:
+  root: data/fedrelshield
