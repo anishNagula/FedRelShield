@@ -1,4 +1,4 @@
-output_dir: ~/code/ULTRA/output/fedrelshield/federated_training
+output_dir: ~/code/ULTRA/output/fedrelshield/relation_aware
 
 dataset_root: ~/code/ULTRA/data/fedrelshield
 
@@ -48,11 +48,13 @@ federation:
   num_rounds: 1
   local_epochs: 1
   batch_per_epoch: 20
-  aggregation_method: fedavg
+  aggregation_method: relation_aware
+  divergence_strength: 5.0
+  alpha: 1.0
 
 evaluation:
   split: valid
 
 checkpointing:
-  enabled: true
-  checkpoint_path: ~/code/ULTRA/output/fedrelshield/federated_training/latest.pth
+  enabled: yes
+  checkpoint_path: ~/code/ULTRA/output/fedrelshield/relation_aware/federated_checkpoint.pth

@@ -14,7 +14,7 @@ from fedrelshield.federation import (
     aggregate_enterprise_metrics,
     evaluation_result_to_dict,
 )
-from ultra import evaluation, model_state, training
+from ultra import evaluation, model_state, tasks, training
 from ultra.models import Ultra
 
 
@@ -61,6 +61,9 @@ class BaselineRunner:
         if self.run_config.baseline_name == "local_only":
             return self._run_local_only()
 
+        if self.run_config.baseline_name == "centralized":
+            return self._run_centralized()
+
         raise NotImplementedError(
             "Baseline is registered but not implemented: "
             f"{self.run_config.baseline_name}"
@@ -106,30 +109,44 @@ class BaselineRunner:
         if (
             self.run_config.baseline_name == "local_only"
         ):
-            if not hasattr(
-                self.cfg,
-                "local_training",
-            ):
-                raise ValueError(
-                    "local_only baseline requires "
-                    "local_training config"
-                )
+            self._validate_training_config(
+                config_name="local_training",
+            )
 
-            if (
-                self.cfg.local_training.local_epochs
-                <= 0
-            ):
-                raise ValueError(
-                    "local_epochs must be positive"
-                )
+        if (
+            self.run_config.baseline_name == "centralized"
+        ):
+            self._validate_training_config(
+                config_name="centralized_training",
+            )
 
-            if (
-                self.cfg.local_training.batch_per_epoch
-                <= 0
-            ):
-                raise ValueError(
-                    "batch_per_epoch must be positive"
-                )
+    def _validate_training_config(
+        self,
+        config_name,
+    ):
+        if not hasattr(
+            self.cfg,
+            config_name,
+        ):
+            raise ValueError(
+                f"{self.run_config.baseline_name} "
+                f"baseline requires {config_name} config"
+            )
+
+        training_cfg = getattr(
+            self.cfg,
+            config_name,
+        )
+
+        if training_cfg.local_epochs <= 0:
+            raise ValueError(
+                "local_epochs must be positive"
+            )
+
+        if training_cfg.batch_per_epoch <= 0:
+            raise ValueError(
+                "batch_per_epoch must be positive"
+            )
 
     def _build_model(self):
         return Ultra(
@@ -286,20 +303,13 @@ class BaselineRunner:
             enterprise_results
         )
 
-    def _train_local_model(
+    def _train_model(
         self,
-        enterprise_id,
+        model,
+        train_data,
+        local_epochs,
+        batch_per_epoch,
     ):
-        enterprise = self.enterprises[
-            enterprise_id
-        ]
-
-        model = self._load_pretrained_model()
-
-        train_data = enterprise[
-            "train_data"
-        ]
-
         train_loader, sampler = (
             training.build_train_loader(
                 train_data=train_data,
@@ -316,9 +326,7 @@ class BaselineRunner:
 
         epoch_losses = []
 
-        for local_epoch in range(
-            self.cfg.local_training.local_epochs
-        ):
+        for local_epoch in range(local_epochs):
             sampler.set_epoch(local_epoch)
 
             average_loss = training.train_one_epoch(
@@ -327,20 +335,139 @@ class BaselineRunner:
                 train_data=train_data,
                 train_loader=train_loader,
                 optimizer=optimizer,
-                batch_per_epoch=(
-                    self.cfg
-                    .local_training
-                    .batch_per_epoch
-                ),
+                batch_per_epoch=batch_per_epoch,
             )
 
             epoch_losses.append(
-                average_loss
+                float(average_loss)
             )
+
+        return epoch_losses
+
+    def _train_local_model(
+        self,
+        enterprise_id,
+    ):
+        enterprise = self.enterprises[
+            enterprise_id
+        ]
+
+        model = self._load_pretrained_model()
+
+        train_data = enterprise[
+            "train_data"
+        ]
+
+        epoch_losses = self._train_model(
+            model=model,
+            train_data=train_data,
+            local_epochs=(
+                self.cfg
+                .local_training
+                .local_epochs
+            ),
+            batch_per_epoch=(
+                self.cfg
+                .local_training
+                .batch_per_epoch
+            ),
+        )
 
         return (
             model,
             sum(epoch_losses) / len(epoch_losses),
+        )
+
+    def _build_centralized_train_data(self):
+        edge_indices = []
+        edge_types = []
+        target_edge_indices = []
+        target_edge_types = []
+    
+        client_num_examples = {}
+    
+        node_offset = 0
+    
+        for enterprise_id in (
+            self.run_config.client_ids
+        ):
+            train_data = self.enterprises[
+                enterprise_id
+            ]["train_data"]
+    
+            edge_indices.append(
+                train_data.edge_index
+                + node_offset
+            )
+    
+            edge_types.append(
+                train_data.edge_type
+            )
+    
+            target_edge_indices.append(
+                train_data.target_edge_index
+                + node_offset
+            )
+    
+            target_edge_types.append(
+                train_data.target_edge_type
+            )
+    
+            client_num_examples[
+                enterprise_id
+            ] = int(
+                train_data
+                .target_edge_index
+                .shape[1]
+            )
+    
+            node_offset += int(
+                train_data.num_nodes
+            )
+    
+        centralized_data = Data(
+            edge_index=torch.cat(
+                edge_indices,
+                dim=1,
+            ),
+            edge_type=torch.cat(
+                edge_types,
+                dim=0,
+            ),
+            target_edge_index=torch.cat(
+                target_edge_indices,
+                dim=1,
+            ),
+            target_edge_type=torch.cat(
+                target_edge_types,
+                dim=0,
+            ),
+            num_nodes=node_offset,
+        )
+    
+        centralized_data.num_relations = int(
+            centralized_data.edge_type.max().item()
+        ) + 1
+    
+        # IMPORTANT:
+        # build_relation_graph mutates centralized_data in place.
+        # Do not assign its return value to relation_graph.
+        tasks.build_relation_graph(
+            centralized_data
+        )
+    
+        if not hasattr(
+            centralized_data,
+            "relation_graph",
+        ):
+            raise RuntimeError(
+                "Centralized data is missing "
+                "relation_graph after processing"
+            )
+    
+        return (
+            centralized_data.to(self.device),
+            client_num_examples,
         )
 
     def _run_zero_shot(self):
@@ -426,3 +553,62 @@ class BaselineRunner:
                 ),
         }
 
+    def _run_centralized(self):
+        model = self._load_pretrained_model()
+
+        (
+            centralized_data,
+            client_num_examples,
+        ) = self._build_centralized_train_data()
+
+        epoch_losses = self._train_model(
+            model=model,
+            train_data=centralized_data,
+            local_epochs=(
+                self.cfg
+                .centralized_training
+                .local_epochs
+            ),
+            batch_per_epoch=(
+                self.cfg
+                .centralized_training
+                .batch_per_epoch
+            ),
+        )
+
+        evaluation_result = (
+            self._evaluate_model(model)
+        )
+
+        total_examples = sum(
+            client_num_examples.values()
+        )
+
+        return {
+            "format_version": "1.0",
+            "baseline": "centralized",
+            "seed": int(
+                self.run_config.seed
+            ),
+            "evaluation_split":
+                self.run_config.evaluation_split,
+            "clients": list(
+                self.run_config.client_ids
+            ),
+            "centralized_training": {
+                "num_examples": int(
+                    total_examples
+                ),
+                "client_num_examples":
+                    client_num_examples,
+                "epoch_losses": epoch_losses,
+                "average_loss": float(
+                    sum(epoch_losses)
+                    / len(epoch_losses)
+                ),
+            },
+            "evaluation":
+                evaluation_result_to_dict(
+                    evaluation_result
+                ),
+        }

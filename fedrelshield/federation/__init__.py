@@ -26,6 +26,16 @@ from fedrelshield.federation.server import (
     FederatedServer,
 )
 
+from fedrelshield.federation.relation_aware import (
+    RelationAwareAggregator,
+)
+
+from fedrelshield.federation.relation_statistics import (
+    build_client_relation_distributions,
+    relation_counts_from_data,
+    relation_distribution_from_data,
+)
+
 __all__ = [
     "CHECKPOINT_FORMAT_VERSION",
     "EnterpriseEvaluationResult",
@@ -42,4 +52,8 @@ __all__ = [
     "load_federated_checkpoint",
     "save_federated_checkpoint",
     "validate_resume_compatibility",
+    "RelationAwareAggregator",
+    "build_client_relation_distributions",
+    "relation_counts_from_data",
+    "relation_distribution_from_data",
 ]

@@ -81,12 +81,17 @@ def validate_result_artifact(
             "Baseline artifact is missing "
             "required contract keys"
         )
-    
+
     allowed_keys = set(required_keys)
-    
+
     if artifact["baseline"] == "local_only":
         allowed_keys.add("local_training")
-    
+
+    if artifact["baseline"] == "centralized":
+        allowed_keys.add(
+            "centralized_training"
+        )
+
     if set(artifact) != allowed_keys:
         raise RuntimeError(
             "Baseline artifact contains "

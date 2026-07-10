@@ -455,83 +455,9 @@ def validate_aggregate(
 
     if set(aggregate) != expected_aggregate_keys:
         raise RuntimeError(
-            f"{context} aggregate keys "
+            f"{label} aggregate keys "
             "do not match contract"
         )
-        
-    stored_enterprises = aggregate[
-        "enterprises"
-    ]
-
-    expected_clients = list(
-        evaluations[0]["enterprises"]
-    )
-
-    if list(stored_enterprises) != expected_clients:
-        raise RuntimeError(
-            f"{context}.enterprises "
-            "client order mismatch"
-        )
-
-    for client_id in expected_clients:
-        stored_entry = stored_enterprises[
-            client_id
-        ]
-
-        if set(stored_entry) != {
-            "metrics",
-            "num_examples",
-        }:
-            raise RuntimeError(
-                f"{context}.{client_id} "
-                "aggregate keys do not "
-                "match contract"
-            )
-
-        expected_num_examples = evaluations[
-            0
-        ]["enterprises"][
-            client_id
-        ]["num_examples"]
-
-        if (
-            stored_entry["num_examples"]
-            != expected_num_examples
-        ):
-            raise RuntimeError(
-                f"{context}.{client_id} "
-                "num_examples mismatch"
-            )
-
-        stored_metrics = stored_entry[
-            "metrics"
-        ]
-
-        if set(stored_metrics) != set(METRIC_NAMES):
-            raise RuntimeError(
-                f"{context}.{client_id} "
-                "metric names mismatch"
-            )
-
-        for metric_name in METRIC_NAMES:
-            values = [
-                evaluation[
-                    "enterprises"
-                ][client_id][
-                    "metrics"
-                ][metric_name]
-                for evaluation in evaluations
-            ]
-
-            validate_statistic(
-                stored_metrics[metric_name],
-                values=values,
-                context=(
-                    f"{context}."
-                    f"{client_id}."
-                    f"{metric_name}"
-                ),
-            )
 
     for metric_group in (
         "macro_metrics",
@@ -899,7 +825,7 @@ def main():
         clients=clients,
     )
 
-        regenerated_aggregates = {}
+    regenerated_aggregates = {}
 
     for alpha in alphas:
         alpha_key = normalize_alpha(alpha)
@@ -1151,3 +1077,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

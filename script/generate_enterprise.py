@@ -74,7 +74,10 @@ def build_topology(config, profile):
     return topology
 
 
-def generate_enterprise(config):
+def generate_enterprise(
+    config,
+    benign_profile=None,
+):
     profile = resolve_enterprise_profile(config)
 
     topology = build_topology(
@@ -82,10 +85,26 @@ def generate_enterprise(config):
         profile=profile,
     )
 
+    if benign_profile is None:
+        benign_profile = profile
+
+    if (
+        benign_profile.enterprise_id
+        != profile.enterprise_id
+    ):
+        raise ValueError(
+            "Benign profile enterprise ID does not "
+            "match topology profile enterprise ID: "
+            f"{benign_profile.enterprise_id} != "
+            f"{profile.enterprise_id}"
+        )
+
+    benign_profile.validate()
+
     benign_events = BenignEventGenerator(
         seed=config.benign_seed,
         num_events=config.benign_num_events,
-        profile=profile,
+        profile=benign_profile,
     ).generate(topology)
 
     attack_campaigns = AttackInjector(
@@ -157,3 +176,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

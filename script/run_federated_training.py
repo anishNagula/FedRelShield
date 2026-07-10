@@ -33,6 +33,8 @@ from fedrelshield.federation import (
     load_federated_checkpoint,
     save_federated_checkpoint,
     validate_resume_compatibility,
+    RelationAwareAggregator,
+    build_client_relation_distributions,
 )
 from ultra import evaluation, model_state
 from ultra.models import Ultra
@@ -407,9 +409,62 @@ def write_metrics_artifact(
     )
 
 
+def build_aggregator(
+    cfg,
+    enterprises,
+):
+    method = str(
+        getattr(
+            cfg.federation,
+            "aggregation_method",
+            "fedavg",
+        )
+    )
+
+    if method == "fedavg":
+        return FedAvgAggregator()
+
+    if method == "relation_aware":
+        relation_distributions = (
+            build_client_relation_distributions(
+                enterprises=enterprises,
+                client_ids=cfg.clients,
+            )
+        )
+
+        divergence_strength = float(
+            getattr(
+                cfg.federation,
+                "divergence_strength",
+                1.0,
+            )
+        )
+
+        alpha = float(
+            getattr(
+                cfg.federation,
+                "alpha",
+                1.0,
+            )
+        )
+
+        return RelationAwareAggregator(
+            relation_distributions=
+                relation_distributions,
+            divergence_strength=
+                divergence_strength,
+            alpha=alpha,
+        )
+
+    raise ValueError(
+        "Unsupported aggregation method: "
+        f"{method}"
+    )
+
+
 def main():
     args = parse_args()
-    
+
     configure_deterministic_execution()
 
     torch.manual_seed(args.seed)
@@ -556,10 +611,59 @@ def main():
         device=device,
     )
 
+    aggregator = build_aggregator(
+        cfg=cfg,
+        enterprises=enterprises,
+    )
+
+    if isinstance(
+        aggregator,
+        RelationAwareAggregator,
+    ):
+        diagnostic_results = tuple(
+            type(
+                "RelationDiagnosticResult",
+                (),
+                {
+                    "client_id": enterprise_id,
+                    "num_examples": int(
+                        enterprises[
+                            enterprise_id
+                        ]["train_data"]
+                        .target_edge_index
+                        .shape[1]
+                    ),
+                },
+            )()
+            for enterprise_id in cfg.clients
+        )
+
+        weights = (
+            aggregator.aggregation_weights(
+                diagnostic_results
+            )
+        )
+
+        print()
+        print(
+            "Relation-aware aggregation "
+            "diagnostics"
+        )
+        print(
+            "--------------------------------"
+        )
+
+        for client_id in cfg.clients:
+            print(
+                f"  {client_id}: "
+                f"weight="
+                f"{weights[client_id]:.6f}"
+            )
+
     coordinator = FederatedCoordinator(
         server=server,
         clients=clients,
-        aggregator=FedAvgAggregator(),
+        aggregator=aggregator,
         evaluator=evaluator,
     )
 
@@ -583,7 +687,9 @@ def main():
             metrics_path,
         )
 
-        print("Federated training already complete")
+        print(
+            "Federated training already complete"
+        )
         print(f"Metrics: {metrics_path}")
         return
 
@@ -633,7 +739,8 @@ def main():
         if checkpointing_enabled:
             federated_checkpoint = (
                 build_federated_checkpoint(
-                    global_state=result.global_state,
+                    global_state=
+                        result.global_state,
                     completed_round=round_id,
                     seed=args.seed,
                     client_ids=cfg.clients,
@@ -673,7 +780,8 @@ def main():
 
         if (
             args.stop_after_round is not None
-            and round_id >= args.stop_after_round
+            and round_id
+            >= args.stop_after_round
         ):
             print()
             print(
@@ -691,10 +799,13 @@ def main():
     )
 
     print()
-    print("Metrics artifact validation: PASS")
+    print(
+        "Metrics artifact validation: PASS"
+    )
     print("Federated training: PASS")
     print(f"Metrics: {metrics_path}")
 
 
 if __name__ == "__main__":
     main()
+
