@@ -1,8 +1,8 @@
 import argparse
 import hashlib
+import statistics
 import json
 import math
-import statistics
 from pathlib import Path
 
 
@@ -20,8 +20,8 @@ METHOD = "relation_aware"
 
 METRIC_NAMES = (
     "hits@1",
-    "hits@3",
     "hits@10",
+    "hits@3",
     "mrr",
 )
 
@@ -100,6 +100,48 @@ def assert_close(
 def normalize_alpha(alpha):
     return f"{float(alpha):.2f}"
 
+def compute_mean(values):
+    if not values:
+        raise RuntimeError(
+            "Cannot compute mean of empty values"
+        )
+
+    return sum(values) / len(values)
+
+
+def compute_sample_std(values):
+    if not values:
+        raise RuntimeError(
+            "Cannot compute standard deviation "
+            "of empty values"
+        )
+
+    if len(values) == 1:
+        return 0.0
+
+    mean = compute_mean(values)
+
+    squared_deviations = [
+        (value - mean) ** 2
+        for value in values
+    ]
+
+    variance = (
+        sum(squared_deviations)
+        / (len(values) - 1)
+    )
+
+    return math.sqrt(variance)
+
+
+def summarize_values(values):
+    return {
+        "mean": compute_mean(values),
+        "std": compute_sample_std(values),
+        "min": min(values),
+        "max": max(values),
+        "num_runs": len(values),
+    }
 
 def validate_metric_mapping(
     metrics,
@@ -403,7 +445,8 @@ def validate_statistic(
             "do not match contract"
         )
 
-    expected_mean = statistics.mean(values)
+    expected_mean = compute_mean(values)
+    expected_std = compute_sample_std(values)
 
     if len(values) > 1:
         expected_std = statistics.stdev(values)
@@ -455,7 +498,7 @@ def validate_aggregate(
 
     if set(aggregate) != expected_aggregate_keys:
         raise RuntimeError(
-            f"{label} aggregate keys "
+            f"{context} aggregate keys "
             "do not match contract"
         )
 
@@ -873,18 +916,7 @@ def main():
 
                 enterprise_metrics[
                     metric_name
-                ] = {
-                    "max": max(values),
-                    "mean":
-                        statistics.mean(values),
-                    "min": min(values),
-                    "num_runs": len(values),
-                    "std": (
-                        statistics.stdev(values)
-                        if len(values) > 1
-                        else 0.0
-                    ),
-                }
+                ] = summarize_values(values)
 
             aggregate["enterprises"][
                 client_id
@@ -908,18 +940,7 @@ def main():
 
                 aggregate[
                     metric_group
-                ][metric_name] = {
-                    "max": max(values),
-                    "mean":
-                        statistics.mean(values),
-                    "min": min(values),
-                    "num_runs": len(values),
-                    "std": (
-                        statistics.stdev(values)
-                        if len(values) > 1
-                        else 0.0
-                    ),
-                }
+                ][metric_name] = summarize_values(values)
 
         regenerated_aggregates[
             alpha_key
@@ -1013,6 +1034,87 @@ def main():
     )
 
     if stored_bytes != regenerated_bytes:
+        def find_first_difference(
+            stored,
+            regenerated,
+            path="root",
+        ):
+            if type(stored) is not type(regenerated):
+                return (
+                    path,
+                    stored,
+                    regenerated,
+                )
+
+            if isinstance(stored, dict):
+                stored_keys = list(stored)
+                regenerated_keys = list(regenerated)
+
+                if stored_keys != regenerated_keys:
+                    return (
+                        f"{path}.__keys__",
+                        stored_keys,
+                        regenerated_keys,
+                    )
+
+                for key in stored:
+                    difference = find_first_difference(
+                        stored[key],
+                        regenerated[key],
+                        f"{path}.{key}",
+                    )
+
+                    if difference is not None:
+                        return difference
+
+                return None
+
+            if isinstance(stored, list):
+                if len(stored) != len(regenerated):
+                    return (
+                        f"{path}.__length__",
+                        len(stored),
+                        len(regenerated),
+                    )
+
+                for index, (
+                    stored_value,
+                    regenerated_value,
+                ) in enumerate(
+                    zip(stored, regenerated)
+                ):
+                    difference = find_first_difference(
+                        stored_value,
+                        regenerated_value,
+                        f"{path}[{index}]",
+                    )
+
+                    if difference is not None:
+                        return difference
+
+                return None
+
+            if stored != regenerated:
+                return (
+                    path,
+                    stored,
+                    regenerated,
+                )
+
+            return None
+
+        difference = find_first_difference(
+            artifact,
+            regenerated_artifact,
+        )
+
+        print()
+        print("FIRST REGENERATION DIFFERENCE")
+        print("-----------------------------")
+        print("Path:", difference[0])
+        print("Stored:", repr(difference[1]))
+        print("Regenerated:", repr(difference[2]))
+
         raise RuntimeError(
             "Independent regeneration of "
             "relation-aware ablation artifact "
@@ -1077,4 +1179,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
 
